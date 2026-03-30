@@ -121,44 +121,64 @@
                 setSelectedCell(null);
 
                 try {
+                    // Load the latest SDK
                     const { GoogleGenAI } = await import("https://esm.run/@google/genai");
-                    const ai = new GoogleGenAI(apiKey);
-                    const model = ai.getGenerativeModel({ model: "gemini-1.5-pro" });
+                    
+                    // Correct initialization for the new SDK
+                    const ai = new GoogleGenAI({ apiKey: apiKey });
                     
                     const base64Data = image.split(',')[1];
                     const prompt = `
-                        Analyze this image which contains a Sudoku puzzle.
+                        Analyze this image which contains a Sudoku puzzle (likely from a newspaper).
                         TASK:
                         1. Locate the 9x9 Sudoku grid.
                         2. Extract ONLY the original BOLD PRINTED numbers.
-                        3. Ignore all handwritten numbers or scribbles.
+                        3. Ignore all handwritten numbers, scribbles, or marker highlights.
                         4. Return the result as a JSON object with a "grid" property containing a 9x9 2D array.
                         Use null for empty cells.
+                        Example format: {"grid": [[5,3,null,...], [6,null,null,...], ...]}
                     `;
 
-                    const result = await model.generateContent([
-                        prompt,
-                        {
-                            inlineData: {
-                                mimeType: "image/png",
-                                data: base64Data,
-                            },
-                        },
-                    ]);
+                    // Use the recommended model and correct method call
+                    const response = await ai.models.generateContent({
+                        model: "gemini-3-flash-preview",
+                        contents: [{
+                            parts: [
+                                { text: prompt },
+                                {
+                                    inlineData: {
+                                        mimeType: "image/png",
+                                        data: base64Data,
+                                    },
+                                },
+                            ]
+                        }],
+                        config: {
+                            responseMimeType: "application/json"
+                        }
+                    });
 
-                    const response = await result.response;
-                    const text = response.text();
-                    const jsonMatch = text.match(/\{[\s\S]*\}/);
-                    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+                    const text = response.text;
+                    if (!text) throw new Error("No response from AI.");
+                    
+                    const parsed = JSON.parse(text);
                     
                     if (parsed.grid && Array.isArray(parsed.grid)) {
                         setGrid(parsed.grid);
                     } else {
-                        throw new Error("Invalid grid format received.");
+                        throw new Error("Invalid grid format received from AI.");
                     }
                 } catch (err) {
-                    console.error(err);
-                    setError("Failed to process image. Please check your API key and image clarity.");
+                    console.error("Full Error:", err);
+                    let message = "Failed to process image.";
+                    if (err.message?.includes("API_KEY_INVALID")) {
+                        message = "Invalid API Key. Please check your key.";
+                    } else if (err.message?.includes("model not found")) {
+                        message = "Model error. Please try again later.";
+                    } else {
+                        message = `Error: ${err.message || "Unknown error"}`;
+                    }
+                    setError(message);
                 } finally {
                     setIsProcessing(false);
                 }
